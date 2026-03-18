@@ -14,25 +14,24 @@
 - ✅ 详细的日志输出
 
 ## 项目结构
-   yanzhao_spider/
+```text
+yanzhao_spider/
 ├── main.py                 # 主程序入口
-├── config.py               # 配置文件
-├── requirements.txt        # 依赖包列表
-├── README.md              # 项目说明文档
+├── README.md               # 项目说明文档
 ├── spider/
 │   ├── __init__.py
-│   ├── core.py            # 核心爬虫类
-│   ├── utils.py           # 工具函数
-│   └── exceptions.py      # 自定义异常
+│   ├── core.py             # 核心爬虫类
+│   ├── utils.py            # 工具函数
+│   └── exceptions.py       # 自定义异常
 ├── models/
 │   ├── __init__.py
-│   └── data_models.py     # 数据模型
+│   └── data_models.py      # 数据模型
 ├── handlers/
-│   ├── __init__.py
-│   ├── excel_handler.py   # Excel处理
+│   ├── handler.py          # Excel处理
 │   ├── progress_handler.py # 进度处理
-│   └── logger_handler.py  # 日志处理
-└── data/                  # 数据存储目录
+│   └── logger_handler.py   # 日志处理
+└── data/                   # 数据存储目录
+```
 ## 安装说明
 
 ### 环境要求
