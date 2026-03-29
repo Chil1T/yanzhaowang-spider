@@ -24,6 +24,47 @@ from spider.exceptions import DriverInitializationError, LoginError
 from spider.utils import resolve_chromedriver_path
 
 
+DEFAULT_TRANSFER_EXPORT_BASE_FIELDS = [
+    "ID",
+    "省市代码",
+    "招生单位代码",
+    "招生单位",
+    "院系所代码",
+    "院系所",
+    "专业代码",
+    "专业",
+    "研究方向代码",
+    "研究方向",
+    "学习方式代码",
+    "学习方式",
+    "专项计划代码",
+    "专项计划",
+    "余额状态",
+    "缺额人数",
+    "发布时间",
+    "备注",
+    "申请条件摘要",
+]
+
+DEFAULT_TRANSFER_EXPORT_DETAIL_FIELDS = [
+    "详情_特殊说明",
+    "详情_初试学位类型要求",
+    "详情_初试门类一级学科专业要求",
+    "详情_初试科目要求",
+    "详情_总分要求",
+    "详情_政治要求",
+    "详情_外语要求",
+    "详情_科目三要求",
+    "详情_科目四要求",
+    "详情_考生编号",
+    "详情_本科门类代码",
+    "详情_本科门类",
+    "详情_本科专业代码",
+    "详情_本科专业",
+    "详情_学习方式代码",
+]
+
+
 class TransferApiSpider:
     """调剂信息 API 爬虫（支持连续抓取并复用登录态）"""
 
@@ -46,8 +87,29 @@ class TransferApiSpider:
         self.page_size = 20
         self.output_file = ""
         self.rows: List[Dict[str, Any]] = []
+        self.export_base_fields = self._resolve_export_fields(
+            getattr(config, "TRANSFER_EXPORT_BASE_FIELDS", DEFAULT_TRANSFER_EXPORT_BASE_FIELDS),
+            DEFAULT_TRANSFER_EXPORT_BASE_FIELDS,
+        )
+        self.export_detail_fields = self._resolve_export_fields(
+            getattr(config, "TRANSFER_EXPORT_DETAIL_FIELDS", DEFAULT_TRANSFER_EXPORT_DETAIL_FIELDS),
+            DEFAULT_TRANSFER_EXPORT_DETAIL_FIELDS,
+        )
 
         self._setup_driver()
+
+    def _resolve_export_fields(self, configured: Any, fallback: List[str]) -> List[str]:
+        """解析导出字段配置并回退默认值"""
+        if not isinstance(configured, list):
+            return list(fallback)
+
+        fields: List[str] = []
+        for field in configured:
+            field_name = str(field).strip()
+            if field_name and field_name not in fields:
+                fields.append(field_name)
+
+        return fields if fields else list(fallback)
 
     def _setup_driver(self):
         """初始化浏览器驱动"""
@@ -390,6 +452,28 @@ class TransferApiSpider:
             "详情_学习方式代码": qexxvo.get("xxfs", ""),
         }
 
+    def _build_export_row(
+        self,
+        base_row: Dict[str, Any],
+        detail_row: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """按配置字段构建最终导出行"""
+        merged_row = dict(base_row)
+        if detail_row:
+            merged_row.update(detail_row)
+
+        export_fields = list(self.export_base_fields)
+        if self.include_detail:
+            export_fields.extend(self.export_detail_fields)
+
+        if not export_fields:
+            return merged_row
+
+        result: Dict[str, Any] = {}
+        for field in export_fields:
+            result[field] = merged_row.get(field, "")
+        return result
+
     def run_task(
         self,
         query_mode: str,
@@ -442,10 +526,11 @@ class TransferApiSpider:
                     break
 
                 for item in items:
-                    row = self._build_row(item)
+                    base_row = self._build_row(item)
+                    detail_row = None
                     if self.include_detail:
-                        detail = self._fetch_detail(str(item.get("id", "")))
-                        row.update(detail)
+                        detail_row = self._fetch_detail(str(item.get("id", "")))
+                    row = self._build_export_row(base_row, detail_row)
                     self.rows.append(row)
 
                 self.logger.info(

@@ -32,10 +32,16 @@ python main.py
 启动后先选模式：
 - `1` 专业目录爬虫（原流程）
 - `2` 调剂信息爬虫（筛选采集）
+- `3` 调剂导出字段配置（CLI写入 `config.py`）
 
 也支持模板启动参数（直接进入调剂模板模式）：
 ```bash
 python main.py --transfer-template tj_fuzzy_fulltime_default
+```
+
+也支持直接进入导出字段配置向导：
+```bash
+python main.py --config-transfer-fields
 ```
 
 ## 调剂模式说明
@@ -97,6 +103,24 @@ python main.py --transfer-template tj_fuzzy_fulltime_default --mldm2 08 --keywor
 
 示例：
 - `调剂_模糊_计算机_M03D28H17M40_含详情_ssdm2-11_mldm2-08_xxfs2-1_dwmc2-计算机_ps-100.xlsx`
+
+### 导出列可配置
+在 `config.py` 里修改以下两个列表即可控制表格内容和顺序：
+- `TRANSFER_EXPORT_BASE_FIELDS`：基础列（列表接口字段）
+- `TRANSFER_EXPORT_DETAIL_FIELDS`：详情列（仅在抓取详情时生效）
+- `TRANSFER_EXPORT_FIELD_DESCRIPTIONS`：字段说明（供 CLI 向导展示）
+
+例如你只想导出核心字段：
+```python
+TRANSFER_EXPORT_BASE_FIELDS = [
+    "招生单位",
+    "专业",
+    "学习方式",
+    "专项计划",
+    "缺额人数",
+    "发布时间",
+]
+```
 
 ## 配置项
 请在 `config.py` 中确认：

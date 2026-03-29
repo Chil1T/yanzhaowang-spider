@@ -5,8 +5,9 @@
 """
 import argparse
 import os
+import re
 import sys
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +44,11 @@ def parse_cli_args():
         "--detail",
         action="store_true",
         help="模板模式下默认抓取申请条件详情",
+    )
+    parser.add_argument(
+        "--config-transfer-fields",
+        action="store_true",
+        help="启动调剂导出字段配置向导并写回 config.py",
     )
     return parser.parse_args()
 
@@ -152,9 +158,10 @@ def select_spider_mode() -> str:
     print("\n爬虫模式：")
     print("1. 专业目录爬虫（原功能）")
     print("2. 调剂信息爬虫（支持筛选）")
+    print("3. 调剂导出字段配置（CLI写入config.py）")
 
-    choice = input("请选择模式 (1/2)，默认为1: ").strip()
-    if choice not in ["1", "2"]:
+    choice = input("请选择模式 (1/2/3)，默认为1: ").strip()
+    if choice not in ["1", "2", "3"]:
         return "1"
     return choice
 
@@ -263,6 +270,186 @@ def format_transfer_task_summary(
     items.append(f"每页={page_size}")
     items.append(f"详情={('是' if include_detail else '否')}")
     return " | ".join(items)
+
+
+def get_transfer_field_descriptions() -> Dict[str, str]:
+    """获取调剂导出字段说明"""
+    configured = getattr(config, "TRANSFER_EXPORT_FIELD_DESCRIPTIONS", {})
+    if isinstance(configured, dict) and configured:
+        result: Dict[str, str] = {}
+        for key, value in configured.items():
+            name = str(key).strip()
+            if name:
+                result[name] = str(value).strip()
+        if result:
+            return result
+
+    # 回退：没有说明时至少保证可配置
+    fallback_fields = []
+    for field in getattr(config, "TRANSFER_EXPORT_BASE_FIELDS", []):
+        if field not in fallback_fields:
+            fallback_fields.append(field)
+    for field in getattr(config, "TRANSFER_EXPORT_DETAIL_FIELDS", []):
+        if field not in fallback_fields:
+            fallback_fields.append(field)
+    return {field: "" for field in fallback_fields}
+
+
+def parse_field_selection(
+    raw: str,
+    ordered_fields: List[str],
+    current_fields: List[str],
+) -> Tuple[List[str], List[str]]:
+    """
+    解析字段选择输入
+
+    返回:
+        (解析后的字段列表, 错误提示列表)
+    """
+    text = (raw or "").strip()
+    if text == "":
+        return list(current_fields), []
+
+    lowered = text.lower()
+    if lowered in {"a", "all"}:
+        return list(ordered_fields), []
+    if lowered in {"n", "none"}:
+        return [], []
+
+    errors: List[str] = []
+    selected: List[str] = []
+    index_map = {str(i + 1): field for i, field in enumerate(ordered_fields)}
+
+    for token in text.split(","):
+        key = token.strip()
+        if not key:
+            continue
+        field = index_map.get(key)
+        if not field:
+            errors.append(key)
+            continue
+        if field not in selected:
+            selected.append(field)
+
+    if not selected and errors:
+        return list(current_fields), errors
+    return selected, errors
+
+
+def _format_python_field_list(var_name: str, fields: List[str]) -> str:
+    """把字段列表格式化成 config.py 赋值文本"""
+    lines = [f"{var_name} = ["]
+    for field in fields:
+        escaped = field.replace("\\", "\\\\").replace('"', '\\"')
+        lines.append(f'    "{escaped}",')
+    lines.append("]")
+    return "\n".join(lines)
+
+
+def save_transfer_export_fields_to_config(
+    base_fields: List[str],
+    detail_fields: List[str],
+) -> Tuple[bool, str]:
+    """回写调剂导出字段到 config.py"""
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        return False, f"读取配置文件失败: {e}"
+
+    base_block = _format_python_field_list("TRANSFER_EXPORT_BASE_FIELDS", base_fields)
+    detail_block = _format_python_field_list("TRANSFER_EXPORT_DETAIL_FIELDS", detail_fields)
+
+    base_pattern = r"TRANSFER_EXPORT_BASE_FIELDS\s*=\s*\[(?:.|\n)*?\]"
+    detail_pattern = r"TRANSFER_EXPORT_DETAIL_FIELDS\s*=\s*\[(?:.|\n)*?\]"
+
+    if not re.search(base_pattern, content, flags=re.S):
+        return False, "未找到 TRANSFER_EXPORT_BASE_FIELDS 配置段"
+    if not re.search(detail_pattern, content, flags=re.S):
+        return False, "未找到 TRANSFER_EXPORT_DETAIL_FIELDS 配置段"
+
+    new_content = re.sub(base_pattern, base_block, content, count=1, flags=re.S)
+    new_content = re.sub(detail_pattern, detail_block, new_content, count=1, flags=re.S)
+
+    try:
+        with open(config_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(new_content)
+    except Exception as e:
+        return False, f"写入配置文件失败: {e}"
+
+    return True, "已写入 config.py"
+
+
+def configure_transfer_export_fields_cli():
+    """CLI配置调剂导出字段并写回 config.py"""
+    print("\n" + "=" * 60)
+    print("调剂导出字段配置向导")
+    print("=" * 60)
+
+    descriptions = get_transfer_field_descriptions()
+    ordered_fields: List[str] = []
+    for field in getattr(config, "TRANSFER_EXPORT_BASE_FIELDS", []):
+        if field not in ordered_fields:
+            ordered_fields.append(field)
+    for field in getattr(config, "TRANSFER_EXPORT_DETAIL_FIELDS", []):
+        if field not in ordered_fields:
+            ordered_fields.append(field)
+    for field in descriptions.keys():
+        if field not in ordered_fields:
+            ordered_fields.append(field)
+
+    current_base = list(getattr(config, "TRANSFER_EXPORT_BASE_FIELDS", []))
+    current_detail = list(getattr(config, "TRANSFER_EXPORT_DETAIL_FIELDS", []))
+
+    print("\n可选字段列表：")
+    for idx, field in enumerate(ordered_fields, 1):
+        tags = []
+        if field in current_base:
+            tags.append("基础")
+        if field in current_detail:
+            tags.append("详情")
+        tag_text = f"[{'/'.join(tags)}]" if tags else "[未选]"
+        desc = descriptions.get(field, "")
+        if desc:
+            print(f"{idx:2d}. {field} {tag_text} - {desc}")
+        else:
+            print(f"{idx:2d}. {field} {tag_text}")
+
+    print("\n输入说明：")
+    print("- 输入序号列表（如: 1,4,7）")
+    print("- 输入 a = 全选，n = 不选，直接回车 = 保持当前")
+
+    base_raw = input("\n请选择【基础导出字段】: ").strip()
+    new_base, base_errors = parse_field_selection(base_raw, ordered_fields, current_base)
+    if base_errors:
+        print(f"基础字段存在无效序号，已忽略: {', '.join(base_errors)}")
+
+    detail_raw = input("请选择【详情导出字段】: ").strip()
+    new_detail, detail_errors = parse_field_selection(detail_raw, ordered_fields, current_detail)
+    if detail_errors:
+        print(f"详情字段存在无效序号，已忽略: {', '.join(detail_errors)}")
+
+    print("\n配置预览：")
+    print(f"- 基础字段数量: {len(new_base)}")
+    print(f"- 详情字段数量: {len(new_detail)}")
+    print(f"- 基础字段: {new_base}")
+    print(f"- 详情字段: {new_detail}")
+
+    confirm = input("\n是否写入 config.py？(y/n，默认y): ").strip().lower()
+    if confirm == "n":
+        print("已取消写入，配置保持不变")
+        return False
+
+    success, message = save_transfer_export_fields_to_config(new_base, new_detail)
+    if success:
+        config.TRANSFER_EXPORT_BASE_FIELDS = new_base
+        config.TRANSFER_EXPORT_DETAIL_FIELDS = new_detail
+        print(f"✓ {message}")
+        return True
+
+    print(f"✗ {message}")
+    return False
 
 
 def select_yes_no(prompt: str, default: bool = False) -> bool:
@@ -527,6 +714,13 @@ def main():
     print_header()
     
     try:
+        if cli_args.config_transfer_fields:
+            configure_transfer_export_fields_cli()
+            print("\n" + "=" * 60)
+            print("程序结束")
+            print("=" * 60)
+            return
+
         if cli_args.transfer_template:
             run_transfer_template_mode(cli_args)
             print("\n" + "=" * 60)
@@ -538,6 +732,16 @@ def main():
 
         if spider_mode == "2":
             run_transfer_mode()
+            print("\n" + "=" * 60)
+            print("程序结束")
+            print("=" * 60)
+            return
+
+        if spider_mode == "3":
+            configure_transfer_export_fields_cli()
+            continue_run = input("\n是否继续进入调剂爬虫模式？(y/n，默认n): ").strip().lower()
+            if continue_run == "y":
+                run_transfer_mode()
             print("\n" + "=" * 60)
             print("程序结束")
             print("=" * 60)
