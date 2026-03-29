@@ -6,6 +6,7 @@
 import re
 import time
 import random
+import os
 from typing import Optional, Tuple, Any
 from datetime import datetime
 
@@ -101,3 +102,45 @@ def generate_filename(major_name: str, study_mode: str, info_type: str) -> str:
         文件名
     """
     return f"研究生招生信息_{major_name}_{study_mode}_{info_type}.xlsx"
+
+
+def resolve_chromedriver_path(candidate_path: str) -> str:
+    """
+    纠正 webdriver-manager 可能返回的非可执行路径，
+    尽量定位到真正的 chromedriver.exe。
+
+    Args:
+        candidate_path: webdriver-manager 返回路径
+
+    Returns:
+        可执行驱动路径（找不到则返回原路径）
+    """
+    if not candidate_path:
+        return candidate_path
+
+    normalized = os.path.normpath(candidate_path)
+
+    # 已经是 chromedriver.exe
+    if os.path.isfile(normalized) and os.path.basename(normalized).lower() == "chromedriver.exe":
+        return normalized
+
+    # 如果是文件（例如 THIRD_PARTY_NOTICES.chromedriver），则在同目录找 exe
+    if os.path.isfile(normalized):
+        search_dir = os.path.dirname(normalized)
+    else:
+        search_dir = normalized
+
+    try:
+        hits = []
+        for root, _, files in os.walk(search_dir):
+            for filename in files:
+                if filename.lower() == "chromedriver.exe":
+                    hits.append(os.path.join(root, filename))
+
+        if hits:
+            hits.sort(key=len)
+            return os.path.normpath(hits[0])
+    except Exception:
+        pass
+
+    return normalized

@@ -131,6 +131,19 @@ INFO_TYPE = {
 CHROME_DRIVER_PATH = r'C:\Users\86157\.wdm\drivers\chromedriver\win64\146.0.7680.76\chromedriver-win32\chromedriver.exe'
 
 # ============================================
+# 调剂爬虫浏览器显示与日志配置
+# ============================================
+# True: 启动时将 Selenium 新开的 Chrome 窗口移到屏幕外（减少 data: 空白页干扰）
+TRANSFER_BROWSER_START_HIDDEN = True
+# 隐藏位置（屏幕外）
+TRANSFER_BROWSER_HIDDEN_POSITION = (-32000, -32000)
+# 需要手动登录时，显示窗口的位置与尺寸
+TRANSFER_BROWSER_VISIBLE_POSITION = (80, 60)
+TRANSFER_BROWSER_VISIBLE_SIZE = (1366, 900)
+# 抑制 chromedriver 控制台日志
+TRANSFER_SUPPRESS_DRIVER_LOGS = True
+
+# ============================================
 # 爬虫默认配置
 # ============================================
 DEFAULT_CONFIG = {
@@ -151,6 +164,27 @@ DEFAULT_CONFIG = {
 URLS = {
     "base": "https://yz.chsi.com.cn/zsml/",
     "detail": "https://yz.chsi.com.cn/zsml/zydetail.do"
+}
+
+# ============================================
+# 调剂信息接口配置
+# ============================================
+TRANSFER_URLS = {
+    "query_page": "https://yz.chsi.com.cn/sytj/tjyx/qecx.action",
+    "query_api": "https://yz.chsi.com.cn/sytj/stu/tjyxqexxcx.action",
+    "detail_api": "https://yz.chsi.com.cn/sytj/stu/gettjyxbktj.action"
+}
+
+TRANSFER_CODE_MAP = {
+    "xxfs": {
+        "1": "全日制",
+        "2": "非全日制"
+    },
+    "zxjh": {
+        "0": "普通计划",
+        "4": "少数民族骨干计划",
+        "7": "退役大学生计划"
+    }
 }
 
 # ============================================

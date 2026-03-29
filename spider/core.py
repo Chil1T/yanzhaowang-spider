@@ -16,6 +16,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from webdriver_manager.chrome import ChromeDriverManager
 
 import config
 from models.data_models import (
@@ -29,7 +30,7 @@ from spider.exceptions import (
 )
 from spider.utils import (
     parse_university_name, extract_total_records, calculate_pages,
-    random_sleep, format_timestamp, safe_get_text
+    random_sleep, format_timestamp, safe_get_text, resolve_chromedriver_path
 )
 from handlers.logger_handler import LoggerHandler
 from handlers.excel_handler import ExcelHandler
@@ -106,42 +107,90 @@ class YanZhaoScraper:
     
     def _setup_driver(self):
         """设置Chrome驱动"""
-        chrome_options = Options()
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.add_argument(
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        )
-        
+        def build_options(minimal: bool) -> Options:
+            opts = Options()
+            opts.add_argument('--no-sandbox')
+            opts.add_argument('--disable-dev-shm-usage')
+            opts.add_argument('--remote-allow-origins=*')
+            opts.add_argument('--no-first-run')
+            opts.add_argument('--no-default-browser-check')
+
+            if self.headless:
+                opts.add_argument('--headless')
+                opts.add_argument('--disable-gpu')
+            if minimal:
+                opts.add_argument('--disable-extensions')
+                opts.add_argument('--disable-background-networking')
+            else:
+                opts.add_argument('--disable-blink-features=AutomationControlled')
+                opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+                opts.add_experimental_option('useAutomationExtension', False)
+                opts.add_argument(
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                )
+            return opts
+
+        def start_with_executable(executable_path: str, strategy_name: str) -> Optional[webdriver.Chrome]:
+            for minimal in (False, True):
+                try:
+                    service = Service(executable_path=executable_path)
+                    return webdriver.Chrome(service=service, options=build_options(minimal))
+                except Exception as e:
+                    mode_name = "最小参数" if minimal else "默认参数"
+                    errors.append(f"{strategy_name}({mode_name})失败: {e}")
+            return None
+
+        def start_with_manager(strategy_name: str) -> Optional[webdriver.Chrome]:
+            for minimal in (False, True):
+                try:
+                    return webdriver.Chrome(options=build_options(minimal))
+                except Exception as e:
+                    mode_name = "最小参数" if minimal else "默认参数"
+                    errors.append(f"{strategy_name}({mode_name})失败: {e}")
+            return None
+
         if self.headless:
-            chrome_options.add_argument('--headless')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--no-first-run')
             self.logger.info("启用无头模式，浏览器将在后台运行")
         else:
             self.logger.info("启用可视模式，将显示浏览器窗口")
-        
-        try:
-            service = Service(executable_path=config.CHROME_DRIVER_PATH)
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            
-            # 隐藏自动化特征
-            self.driver.execute_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            )
-            self.wait = WebDriverWait(self.driver, config.DEFAULT_CONFIG["timeout"])
-            
-            mode_text = "无头模式" if self.headless else "可视模式"
-            self.logger.success(f"Chrome驱动初始化成功 ({mode_text})")
-            
-        except Exception as e:
-            error_msg = f"Chrome驱动初始化失败: {e}"
+
+        errors = []
+
+        # 策略1：优先使用配置路径
+        configured_driver = getattr(config, "CHROME_DRIVER_PATH", "")
+        if configured_driver:
+            if os.path.exists(configured_driver):
+                self.driver = start_with_executable(configured_driver, "配置路径驱动")
+            else:
+                errors.append(f"配置路径不存在: {configured_driver}")
+
+        # 策略2：Selenium Manager
+        if self.driver is None:
+            self.driver = start_with_manager("Selenium Manager")
+
+        # 策略3：webdriver-manager
+        if self.driver is None:
+            try:
+                manager_path = ChromeDriverManager().install()
+                driver_path = resolve_chromedriver_path(manager_path)
+                self.driver = start_with_executable(driver_path, "webdriver-manager")
+            except Exception as e:
+                errors.append(f"webdriver-manager 安装失败: {e}")
+
+        if self.driver is None:
+            error_msg = "Chrome驱动初始化失败: " + (" | ".join(errors) if errors else "未知错误")
             self.logger.error(error_msg)
             raise DriverInitializationError(error_msg)
+
+        # 隐藏自动化特征
+        self.driver.execute_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+        self.wait = WebDriverWait(self.driver, config.DEFAULT_CONFIG["timeout"])
+
+        mode_text = "无头模式" if self.headless else "可视模式"
+        self.logger.success(f"Chrome驱动初始化成功 ({mode_text})")
     
     def _update_progress(self, status: str = "运行中"):
         """更新进度"""
